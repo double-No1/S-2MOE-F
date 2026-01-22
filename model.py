@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 from datetime import datetime
-from Code.gin_model.Models import OCGIN
-from Code.Losses import OCC_loss, InfoNCELoss
+from gin_model.Models import OCGIN
+from Losses import OCC_loss, InfoNCELoss
 from masknet_train import ParametricMaskNet
 
 
