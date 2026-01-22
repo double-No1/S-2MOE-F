@@ -1,4 +1,4 @@
-# Revisiting Graph-Level Anomaly Detection: From Partially to Fully Unsupervised Learning
+# Semi-Supervised Fake News Detection with Mixture of Experts
 This is the demo code for the S^2MOE-F framework
 
 ## System requirement
