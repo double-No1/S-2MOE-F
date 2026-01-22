@@ -5,16 +5,16 @@ This is the demo code for the S^2MOE-F framework
 
 #### Programming language
 ```
-Python 3.10.0
+Python 3.8.20
 ```
 #### Python Packages
 ```
-PyTorch 2.12.0
+PyTorch 2.1.0
 CUDA 11.8.1
 torch-geometric 2.2.0
-numpy   1.22.3
-scikit-learn 1.6.1
-scipy   1.15.1
+numpy   1.24.4
+scikit-learn 1.3.2
+scipy   1.10.1
 ```
 
 ## Run the demo code
