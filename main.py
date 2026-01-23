@@ -282,13 +282,13 @@ def run_cross_validation(args, device):
 
     for train_idx, test_idx in kf.split(all_indices):
         fold_indices.append((train_idx, test_idx))
-    print(f"数据集总样本数：{dataset_size}，预存5个Fold的索引完成")
+
 
     LLAMA_HIDDEN_SIZE = full_dataset[0][1].shape[0]
 
 
     for fold, (train_idx, test_idx) in enumerate(fold_indices):
-        print(f"\n=== 开始Fold {fold + 1} 训练 ===")
+        print(f"\n=== Fold {fold + 1} ===")
 
         train_dataset = torch.utils.data.Subset(full_dataset, train_idx)
         test_dataset = torch.utils.data.Subset(full_dataset, test_idx)
@@ -406,9 +406,6 @@ def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     print(f"Using Device: {device}")
 
-    print("\n" + "=" * 60)
-    print("Start LLAMA Feature + Graph Data Training (5-Fold CV)")
-    print("=" * 60)
     run_cross_validation(args, device)
 
 

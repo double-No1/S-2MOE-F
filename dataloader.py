@@ -386,8 +386,8 @@ class CombinedDataset(InMemoryDataset):
         self.data, self.slices = InMemoryDataset.collate(data_list)
         self._split_data()
         save_data = (self.data, self.slices, self.folds)
-        if self.llama_dict:  # Key modification: llama_dict → qwen_dict
-            save_data += (self.llama_dict,)  # Key modification: llama_dict → qwen_dict
+        if self.llama_dict:
+            save_data += (self.llama_dict,)
         torch.save(save_data, self.processed_paths[0])
         print(f"Data saving completed: {self.processed_paths[0]}")
 
