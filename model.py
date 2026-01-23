@@ -10,7 +10,7 @@ from masknet_train import ParametricMaskNet
 
 class MergeModel(nn.Module):
     def __init__(self, dim_features, config1, device,
-                 num_chunks=4, threshold=0.5, alpha=0.3, beta=0.5, gamma=0.3):
+                 num_chunks=4, threshold=0.5, alpha=0.2, beta=0.5, gamma=0.3):
         super(MergeModel, self).__init__()
         self.device = device
         self.num_chunks = num_chunks
@@ -48,6 +48,20 @@ class MergeModel(nn.Module):
         self.pseudo_label_threshold = 0.95
         self.top_k_ratio = 0.2
 
+        self.policy_net = nn.Sequential(
+            nn.Linear(2, 16),
+            nn.ReLU(),
+            nn.Linear(16, 2),
+            nn.Softmax(dim=-1)
+        ).to(device)
+
+        self.epsilon_start = 0.9
+        self.epsilon_end = 0.1
+        self.epsilon_decay = 1000
+        self.global_step = 0
+
+        self.log_probs = []
+        self.rewards = []
 
     def split_chunks(self, x):
         assert x.size(1) % self.num_chunks == 0
@@ -112,7 +126,6 @@ class MergeModel(nn.Module):
             self.center.data = all_embeddings.mean(dim=0, keepdim=True)
 
     def generate_pseudo_labels(self, graph_data, llama_emb):
-
         self.eval()
         with torch.no_grad():
             g_emb, _ = self.gin_features(graph_data)
@@ -126,33 +139,73 @@ class MergeModel(nn.Module):
             pseudo_labels = (confidence > self.pseudo_label_threshold).long()
         return pseudo_labels, confidence
 
-    def forward(self, data, llama_emb, labels=None, return_feat=False):
+    def _get_epsilon(self):
 
+        eps = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
+              torch.exp(torch.tensor(-self.global_step / self.epsilon_decay, device=self.device)).item()
+        self.global_step += 1
+        return eps
+
+    def _compute_rl_reward(self, outputs_1, outputs_2, labels):
+
+        true_news_mask = (labels == 1)
+        if not torch.any(true_news_mask):
+            return torch.tensor([0.5, 0.5], device=self.device)
+
+        h_t = outputs_1[true_news_mask]
+        z_t = outputs_2[true_news_mask]
+        theta = self.center.expand(h_t.shape[0], -1)
+        r_gnn_per_sample = F.cosine_similarity(h_t, theta, dim=1)
+        r_llm_per_sample = F.cosine_similarity(z_t, theta,dim=1)
+
+        r_gnn = r_gnn_per_sample.mean()
+        r_llm = r_llm_per_sample.mean()
+
+        reward_signal = torch.stack([r_gnn, r_llm])
+        return reward_signal.to(self.device)
+
+    def _rl_weight_routing(self, reward_signal):
+
+        eps = self._get_epsilon()
+        policy_dist = self.policy_net(reward_signal.unsqueeze(0))  # [1, 2]
+
+        if torch.rand(1, device=self.device).item() < eps:
+
+            weights = torch.ones(2, device=self.device) / 2.0
+        else:
+            m = torch.distributions.Categorical(policy_dist)
+            action = m.sample()
+            weights = F.one_hot(action, num_classes=2).float().squeeze(0)
+            if weights.sum() < self.epsilon:
+                weights = policy_dist.squeeze(0)
+
+        weight_sum = weights.sum() + self.epsilon
+        w_gnn = weights[0] / weight_sum
+        w_llm = weights[1] / weight_sum
+        log_prob = torch.log(policy_dist + self.epsilon).squeeze(0)
+        return w_gnn, w_llm, log_prob
+
+    def reset_rl_state(self):
+
+        self.log_probs = []
+        self.rewards = []
+
+    def forward(self, data, llama_emb, labels=None, return_feat=False):
         outputs_1, _ = self.gin_features(data)
         outputs_2 = self.llama_proj(llama_emb)
 
         outputs_1 = F.normalize(outputs_1.float().to(self.device), dim=1)
         outputs_2 = F.normalize(outputs_2.float().to(self.device), dim=1)
+        w_gnn = w_llm = 0.5
+        log_prob = None
 
-        center = self.center
-        cos_sim_1 = F.cosine_similarity(outputs_1, center, dim=1).mean()
-        cos_sim_2 = F.cosine_similarity(outputs_2, center, dim=1).mean()
-
-        step_size = 0.02
-        weights = F.softmax(torch.tensor([cos_sim_1.item(), cos_sim_2.item()]), dim=0)
-
-        w_gnn = weights[0] + step_size * (cos_sim_1 - cos_sim_2).item()
-        w_llm = weights[1] - step_size * (cos_sim_1 - cos_sim_2).item()
-
-        w_gnn = max(0.0, w_gnn)
-        w_llm = max(0.0, w_llm)
-
-        weight_sum = w_gnn + w_llm + 1e-8
-        w_gnn /= weight_sum
-        w_llm /= weight_sum
+        if labels is not None:
+            reward_signal = self._compute_rl_reward(outputs_1, outputs_2, labels)
+            w_gnn, w_llm, log_prob = self._rl_weight_routing(reward_signal)
+            self.log_probs.append(log_prob)
+            self.rewards.append(reward_signal.mean())
 
         g_new, t_new = self.dual_attention_transform(outputs_1, outputs_2)
-
         info_nce_loss = self.info_nce_loss(g_new, t_new)
 
         occ = 0.0
@@ -161,10 +214,14 @@ class MergeModel(nn.Module):
                   w_llm * self.occ_loss(t_new, labels, self.center)
 
         cov_loss = self.compute_covariance_loss(g_new, t_new)
-
         total_loss = self.alpha * info_nce_loss + \
                      self.beta * occ + \
                      self.gamma * cov_loss
+
+
+        if self.training and log_prob is not None and len(self.rewards) > 0:
+            policy_loss = -log_prob.mean() * self.rewards[-1]
+            total_loss += 0.1 * policy_loss
 
         combined = (g_new + t_new) / 2
         logits = self.classifier(combined)

@@ -47,7 +47,7 @@ def train_stage1(model, train_loader, device, total_epochs, optimizer, scheduler
             optimizer.zero_grad()
             logits, total_loss, _ = model(graph_data, llama_emb, labels, return_feat=True)
             cls_loss = ce_loss_fn(logits, labels)
-            combined_loss = 1 * total_loss.mean() + 0.03 * cls_loss
+            combined_loss = 1 * total_loss.mean() + 0.1 * cls_loss
 
             combined_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -235,7 +235,7 @@ def train_stage2_and_record_epochs(model, train_loader, test_loader, device, tot
             optimizer.zero_grad()
             logits, total_loss, _ = model(graph_data, llama_emb, labels, return_feat=True)
             cls_loss = ce_loss_fn(logits, labels)
-            combined_loss = 1 * total_loss.mean() + 0.05 * cls_loss
+            combined_loss = 1 * total_loss.mean() + 0.1 * cls_loss
 
             if torch.isnan(combined_loss) or torch.isnan(logits).any():
                 combined_loss = torch.nan_to_num(combined_loss, nan=1e5)
@@ -386,8 +386,8 @@ def main():
     parser.add_argument('--lr', type=float, default=5e-5, help='Initial learning rate (Stage1)')
     parser.add_argument('--weight_decay', type=float, default=5e-5, help='Weight decay')
     parser.add_argument('--nhid', type=int, default=128, help='GIN hidden dimension')
-    parser.add_argument('--epochs_stage1', type=int, default=50, help='Stage1 training epochs')
-    parser.add_argument('--epochs_stage2', type=int, default=100, help='Stage2 training epochs')
+    parser.add_argument('--epochs_stage1', type=int, default=100, help='Stage1 training epochs')
+    parser.add_argument('--epochs_stage2', type=int, default=150, help='Stage2 training epochs')
     parser.add_argument('--feature', type=str, default='spacy', help='Graph feature type (match CombinedDataset)')
     parser.add_argument('--llama_pt_path', type=str,
                         default=r"D:\processed\COVID\LLAMA\combined_processed.pt",
